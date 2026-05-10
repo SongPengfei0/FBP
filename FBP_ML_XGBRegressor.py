@@ -4,112 +4,69 @@
 # @Date  : 2019/5/27
 # @Desc  :FBP ML
 # http://www.captainbed.net/blog-acredjb
-import pandas as pd
-import matplotlib.pyplot as plt
-import xgboost as xgb
-from sklearn import preprocessing
+import argparse
+import os
+
 import numpy as np
-from xgboost import plot_importance
-from sklearn.preprocessing import Imputer
-# from sklearn.cross_validation import train_test_split
-from sklearn.model_selection import KFold
-from sklearn.model_selection import train_test_split
+import pandas as pd
+import xgboost as xgb
+from sklearn.impute import SimpleImputer
+
+
+DENSE_FEATURES = ['Oddset', 'li', 'bet365', 'interw', 'wl', 'w', 'ao']
+SPARSE_FEATURES = ['10bet', 'jbb', 'ms', 'ysb', 'Pinnacle', 'SNAI']
+
+
+def buildFeatures(data):
+    # Old code used Imputer(axis=1) (per-row mean); SimpleImputer only supports
+    # column-wise imputation, which is the more standard choice anyway.
+    imputer = SimpleImputer(strategy='mean')
+    sparse = imputer.fit_transform(data.loc[:, SPARSE_FEATURES])
+    dense = data.loc[:, DENSE_FEATURES].to_numpy()
+    return np.hstack([dense, sparse])
 
 
 def featureSet(data):
-    imputer = Imputer(missing_values='NaN', strategy='mean', axis=1)
-    imputer.fit(data.loc[:, ['10bet', 'jbb', 'ms', 'ysb', 'Pinnacle', 'SNAI']])
-    x_new = imputer.transform(data.loc[:, ['10bet', 'jbb', 'ms', 'ysb', 'Pinnacle', 'SNAI']])
-
-
-    data_num = len(data)
-    XList = []
-    for row in range(0, data_num):
-        tmp_list = []
-        tmp_list.append(data.iloc[row]['Oddset'])
-        tmp_list.append(data.iloc[row]['li'])
-        tmp_list.append(data.iloc[row]['bet365'])
-        tmp_list.append(data.iloc[row]['interw'])
-        tmp_list.append(data.iloc[row]['wl'])
-        tmp_list.append(data.iloc[row]['w'])
-        tmp_list.append(data.iloc[row]['ao'])
-        # tmp_list.append(data.iloc[row]['10bet'])
-        # tmp_list.append(data.iloc[row]['jbb'])
-        # tmp_list.append(data.iloc[row]['ms'])
-        # tmp_list.append(data.iloc[row]['ysb'])
-        tmp_list.append(x_new[row][0])
-        tmp_list.append(x_new[row][1])
-        tmp_list.append(x_new[row][2])
-        tmp_list.append(x_new[row][3])
-        tmp_list.append(x_new[row][4])
-        tmp_list.append(x_new[row][5])
-        XList.append(tmp_list)
-    yList = data.y.values
-    return XList, yList
+    return buildFeatures(data), data['y'].values
 
 
 def loadTestData(filePath):
-    data = pd.read_csv(filepath_or_buffer=filePath)
-    imputer = Imputer(missing_values='NaN', strategy='mean', axis=1)
-    imputer.fit(data.loc[:, ['10bet', 'jbb', 'ms', 'ysb', 'Pinnacle', 'SNAI']])
-    x_new = imputer.transform(data.loc[:, ['10bet', 'jbb', 'ms', 'ysb', 'Pinnacle', 'SNAI']])
-
-    data_num = len(data)
-    XList = []
-    for row in range(0, data_num):
-        tmp_list = []
-        tmp_list.append(data.iloc[row]['Oddset'])
-        tmp_list.append(data.iloc[row]['li'])
-        tmp_list.append(data.iloc[row]['bet365'])
-        tmp_list.append(data.iloc[row]['interw'])
-        tmp_list.append(data.iloc[row]['wl'])
-        tmp_list.append(data.iloc[row]['w'])
-        tmp_list.append(data.iloc[row]['ao'])
-        # tmp_list.append(data.iloc[row]['10bet'])
-        # tmp_list.append(data.iloc[row]['jbb'])
-        # tmp_list.append(data.iloc[row]['ms'])
-        # tmp_list.append(data.iloc[row]['ysb'])
-        tmp_list.append(x_new[row][0])
-        tmp_list.append(x_new[row][1])
-        tmp_list.append(x_new[row][2])
-        tmp_list.append(x_new[row][3])
-        tmp_list.append(x_new[row][4])
-        tmp_list.append(x_new[row][5])
-        XList.append(tmp_list)
-    return XList
+    return buildFeatures(pd.read_csv(filePath))
 
 
-def trainandTest(X_train, y_train, X_test):
-    # XGBoost训练过程
-    model = xgb.XGBRegressor(max_depth=2, learning_rate=0.01, n_estimators=500, silent=False, objective='reg:gamma')
+def trainandTest(X_train, y_train, X_test, ids, output_path):
+    model = xgb.XGBRegressor(
+        max_depth=2,
+        learning_rate=0.01,
+        n_estimators=500,
+        objective='reg:gamma',
+    )
     model.fit(X_train, y_train)
 
-    # 对测试集进行预测
     ans = model.predict(X_test)
-    ans_len = len(ans)
-    # print(ans_len)
-    # print('---------------')
-    # print('ans(0):'+str(ans[1]))
-    # print('')
-    id_list = np.arange(5709, 6108)
-    data_arr = []
-    for row in range(0, ans_len):
-        data_arr.append([int(id_list[row]), ans[row]])
-        print(ans[row])
-    np_data = np.array(data_arr)
+    for prediction in ans:
+        print(prediction)
 
-    # 写入文件
-    pd_data = pd.DataFrame(np_data, columns=['id', 'y'])
-    pd_data.to_csv('FBP_submit.csv', index=None)
+    pd.DataFrame({'id': ids, 'y': ans}).to_csv(output_path, index=False)
 
-    # 显示重要特征
-    plot_importance(model)
-    plt.show()
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    parser = argparse.ArgumentParser(description='FBP XGBoost regressor')
+    parser.add_argument('--train', default=os.path.join(here, 'FBP_train.csv'))
+    parser.add_argument('--predict', default=os.path.join(here, 'FBP_predict.csv'))
+    parser.add_argument('--output', default=os.path.join(here, 'FBP_submit.csv'))
+    args = parser.parse_args()
+
+    train_df = pd.read_csv(args.train)
+    predict_df = pd.read_csv(args.predict)
+
+    X_train, y_train = featureSet(train_df)
+    X_test = buildFeatures(predict_df)
+    ids = predict_df['id'].values
+
+    trainandTest(X_train, y_train, X_test, ids, args.output)
+
 
 if __name__ == '__main__':
-    trainFilePath = 'E:/PythonLearn/pc_ex/AdaBoost_PeiLv/FBP_train.csv'
-    testFilePath = 'E:/PythonLearn/pc_ex/AdaBoost_PeiLv/FBP_predict.csv'
-    data = pd.read_csv(trainFilePath)
-    X_train, y_train = featureSet(data)
-    X_test = loadTestData(testFilePath)
-    trainandTest(X_train, y_train, X_test)
+    main()
